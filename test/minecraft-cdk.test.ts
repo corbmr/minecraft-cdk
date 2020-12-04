@@ -1,15 +1,17 @@
 import { expect as expectCDK, countResources } from '@aws-cdk/assert';
+import { InstanceClass, InstanceSize, InstanceType } from '@aws-cdk/aws-ec2';
 import * as cdk from '@aws-cdk/core';
-import * as MinecraftCdk from '../lib/index';
+import { MinecraftCdkStack } from '../lib/index';
 
 /*
  * Example test 
  */
 test('SNS Topic Created', () => {
   const app = new cdk.App();
-  const stack = new cdk.Stack(app, "TestStack");
   // WHEN
-  new MinecraftCdk.MinecraftCdk(stack, 'MyTestConstruct');
+  const stack = new MinecraftCdkStack(app, 'MyTestConstruct', {
+    instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.MEDIUM)
+  })
   // THEN
-  expectCDK(stack).to(countResources("AWS::SNS::Topic",0));
+  expectCDK(stack).to(countResources('AWS::ECS::Cluster', 1));
 });
