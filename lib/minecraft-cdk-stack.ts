@@ -18,6 +18,7 @@ import * as path from 'path';
 export type Difficulty = 'peaceful' | 'easy' | 'normal' | 'hard'
 
 export interface MinecraftServerOptions {
+  version?: string,
   ops?: string[],
   difficulty?: Difficulty,
   mods?: string[],
@@ -30,6 +31,7 @@ export interface CustomDomainProps {
 }
 
 export interface MinecraftCdkStackProps extends cdk.StackProps {
+  imageTag?: string,
   instanceType: InstanceType,
   keyName?: string,
   spotPrice?: string,
@@ -37,6 +39,7 @@ export interface MinecraftCdkStackProps extends cdk.StackProps {
   plugins?: string,
   backup?: BackupPlanRule,
   rcon?: boolean,
+  memoryReservation?: number,
   customDomain?: CustomDomainProps,
 }
 
@@ -118,10 +121,10 @@ export class MinecraftCdkStack extends cdk.Stack {
     }
 
     const minecraftContainer = taskDefinition.addContainer('Minecraft', {
-      image: ContainerImage.fromRegistry('itzg/minecraft-server:latest'),
+      image: ContainerImage.fromRegistry(`itzg/minecraft-server:${props.imageTag ?? 'latest'}`),
       environment: this.makeEnv(props.serverOptions),
       secrets: this.makeSecret(),
-      memoryReservationMiB: 1024,
+      memoryReservationMiB: props.memoryReservation ?? 1024,
       logging: LogDriver.awsLogs({
         streamPrefix: 'minecraft/server-logs',
         logRetention: RetentionDays.THREE_DAYS,
@@ -195,6 +198,7 @@ export class MinecraftCdkStack extends cdk.Stack {
       'FORCE_REDOWNLOAD': 'true',
     }
     if (!props) return env
+    if (props.version) env['VERSION'] = props.version
     if (props.difficulty) env['DIFFICULTY'] = props.difficulty
     if (props.ops) env['OPS'] = props.ops.join(',')
     if (props.mods) env['MODS'] = props.mods.join(',')
