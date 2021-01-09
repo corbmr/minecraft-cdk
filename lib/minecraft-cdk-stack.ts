@@ -44,6 +44,8 @@ export interface MinecraftCdkStackProps extends cdk.StackProps {
 }
 
 export class MinecraftCdkStack extends cdk.Stack {
+  public readonly cluster: Cluster
+
   private readonly plugins?: Asset
   private readonly rconSecret?: secret.Secret
   private readonly autoScaling: AutoScalingGroup
@@ -62,24 +64,24 @@ export class MinecraftCdkStack extends cdk.Stack {
       ],
     })
 
-    const cluster = new Cluster(this, 'Cluster', {
+    this.cluster = new Cluster(this, 'Cluster', {
       vpc,
     })
-    this.autoScaling = cluster.addCapacity('Autoscaling', {
+    this.autoScaling = this.cluster.addCapacity('Autoscaling', {
       instanceType: props.instanceType,
       spotPrice: props.spotPrice,
       maxCapacity: 1,
       keyName: props.keyName,
     })
-    cluster.connections.allowFromAnyIpv4(Port.tcp(22), 'Allow ssh')
-    cluster.connections.allowFromAnyIpv4(Port.tcp(25565), 'Allow minecraft connections')
-    cluster.connections.allowFromAnyIpv4(Port.icmpPing(), 'Allow ping')
+    this.cluster.connections.allowFromAnyIpv4(Port.tcp(22), 'Allow ssh')
+    this.cluster.connections.allowFromAnyIpv4(Port.tcp(25565), 'Allow minecraft connections')
+    this.cluster.connections.allowFromAnyIpv4(Port.icmpPing(), 'Allow ping')
 
     const fileSystem = new FileSystem(this, 'MinecraftFileSystem', {
       vpc: vpc,
       lifecyclePolicy: LifecyclePolicy.AFTER_7_DAYS,
     })
-    fileSystem.connections.allowDefaultPortFrom(cluster)
+    fileSystem.connections.allowDefaultPortFrom(this.cluster)
 
     if (props.backup) {
       const backup = new BackupPlan(this, 'BackupPlan', {
@@ -117,7 +119,7 @@ export class MinecraftCdkStack extends cdk.Stack {
           excludePunctuation: true,
         }
       })
-      cluster.connections.allowFromAnyIpv4(Port.tcp(25575), 'Allow rcon connections')
+      this.cluster.connections.allowFromAnyIpv4(Port.tcp(25575), 'Allow rcon connections')
     }
 
     const minecraftContainer = taskDefinition.addContainer('Minecraft', {
@@ -150,7 +152,7 @@ export class MinecraftCdkStack extends cdk.Stack {
     }
 
     new Ec2Service(this, 'MinecraftServer', {
-      cluster,
+      cluster: this.cluster,
       taskDefinition,
       minHealthyPercent: 0,
       maxHealthyPercent: 100,
@@ -175,9 +177,14 @@ export class MinecraftCdkStack extends cdk.Stack {
       initialPolicy: [
         new PolicyStatement({
           actions: ['route53:ChangeResourceRecordSets'],
-          resources: [hostedZone.hostedZoneArn]
-        })
-      ]
+          resources: [hostedZone.hostedZoneArn],
+        }),
+
+        new PolicyStatement({
+          actions: ['ec2:DescribeInstances'],
+          resources: ['*'],
+        }),
+      ],
     })
 
     new events.Rule(this, 'DomainRule', {

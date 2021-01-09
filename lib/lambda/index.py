@@ -10,7 +10,7 @@ ec2 = boto3.resource('ec2')
 r53 = boto3.client('route53')
 
 def handler(event, context):
-    instance = ec2.Instance(event['event']['EC2InstanceId'])
+    instance = ec2.Instance(event['detail']['EC2InstanceId'])
     r53.change_resource_record_sets(
         HostedZoneId=hosted_zone_id,
         ChangeBatch={
