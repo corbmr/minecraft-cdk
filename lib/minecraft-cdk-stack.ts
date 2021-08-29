@@ -1,7 +1,7 @@
-import { AutoScalingGroup } from '@aws-cdk/aws-autoscaling';
+import { IAutoScalingGroup } from '@aws-cdk/aws-autoscaling';
 import { BackupPlan, BackupPlanRule, BackupResource } from '@aws-cdk/aws-backup';
-import { InstanceType, Port, SubnetType, Vpc } from '@aws-cdk/aws-ec2';
-import { Cluster, ContainerImage, Ec2Service, Ec2TaskDefinition, LogDriver, Secret } from '@aws-cdk/aws-ecs';
+import { InstanceType, IVpc, Port, SubnetType, Vpc } from '@aws-cdk/aws-ec2';
+import { Cluster, ContainerImage, Ec2Service, Ec2TaskDefinition, ICluster, LogDriver, Secret } from '@aws-cdk/aws-ecs';
 import { FileSystem, LifecyclePolicy } from '@aws-cdk/aws-efs';
 import * as events from '@aws-cdk/aws-events';
 import { LambdaFunction } from '@aws-cdk/aws-events-targets';
@@ -18,67 +18,91 @@ import * as path from 'path';
 export type Difficulty = 'peaceful' | 'easy' | 'normal' | 'hard'
 
 export interface MinecraftServerOptions {
-  version?: string,
-  ops?: string[],
-  difficulty?: Difficulty,
-  mods?: string[],
-  motd?: string,
+  version?: string
+  ops?: string[]
+  difficulty?: Difficulty
+  mods?: string[]
+  motd?: string
 }
 
 export interface CustomDomainProps {
-  hostedZoneId: string,
-  domainName: string,
+  hostedZoneId: string
+  domainName: string
+}
+
+export interface ClusterOptions {
+  instanceType: InstanceType
+  keyName?: string
+  spotPrice?: string
+  vpc?: IVpc
 }
 
 export interface MinecraftCdkStackProps extends cdk.StackProps {
-  imageTag?: string,
-  instanceType: InstanceType,
-  keyName?: string,
-  spotPrice?: string,
-  serverOptions?: MinecraftServerOptions,
-  plugins?: string,
-  backup?: BackupPlanRule,
-  rcon?: boolean,
-  memoryReservation?: number,
-  customDomain?: CustomDomainProps,
+  imageTag?: string
+  cluster?: ICluster
+  clusterOptions?: ClusterOptions
+  serverOptions?: MinecraftServerOptions
+  plugins?: string
+  backup?: BackupPlanRule
+  rcon?: boolean
+  memoryReservation?: number
+  customDomain?: CustomDomainProps
 }
 
 export class MinecraftCdkStack extends cdk.Stack {
-  public readonly cluster: Cluster
+  public readonly cluster: ICluster
+  public readonly vpc: IVpc
+  public readonly autoScaling: IAutoScalingGroup
 
   private readonly plugins?: Asset
   private readonly rconSecret?: secret.Secret
-  private readonly autoScaling: AutoScalingGroup
 
   constructor(scope: cdk.Construct, id: string, props: MinecraftCdkStackProps) {
     super(scope, id, props)
 
-    const vpc = new Vpc(this, 'Vpc', {
-      maxAzs: 2,
-      subnetConfiguration: [
-        {
-          subnetType: SubnetType.PUBLIC,
-          name: 'Public',
-          cidrMask: 26,
-        }
-      ],
-    })
+    if ((!props.cluster && !props.clusterOptions) || (props.cluster && props.clusterOptions)) {
+      throw 'exactly one of cluster or clusterOptions must be provided'
+    }
 
-    this.cluster = new Cluster(this, 'Cluster', {
-      vpc,
-    })
-    this.autoScaling = this.cluster.addCapacity('Autoscaling', {
-      instanceType: props.instanceType,
-      spotPrice: props.spotPrice,
-      maxCapacity: 1,
-      keyName: props.keyName,
-    })
+    if (props.cluster) {
+      if (!props.cluster.hasEc2Capacity) {
+        throw 'cluster must have ec2 capacity'
+      }
+      this.cluster = props.cluster
+      this.vpc = this.cluster.vpc
+    } else {
+      const { instanceType, keyName, spotPrice, vpc } = props.clusterOptions!
+
+      this.vpc = vpc ?? new Vpc(this, 'Vpc', {
+        maxAzs: 2,
+        subnetConfiguration: [
+          {
+            subnetType: SubnetType.PUBLIC,
+            name: 'Public',
+            cidrMask: 26,
+          }
+        ],
+      })
+
+      this.cluster = new Cluster(this, 'Cluster', {
+        vpc: this.vpc,
+        capacity: {
+          instanceType,
+          spotPrice,
+          keyName,
+          minCapacity: 0,
+          maxCapacity: 1,
+        }
+      })
+    }
+    
+    this.autoScaling = this.cluster.autoscalingGroup!
     this.cluster.connections.allowFromAnyIpv4(Port.tcp(22), 'Allow ssh')
     this.cluster.connections.allowFromAnyIpv4(Port.tcp(25565), 'Allow minecraft connections')
     this.cluster.connections.allowFromAnyIpv4(Port.icmpPing(), 'Allow ping')
 
     const fileSystem = new FileSystem(this, 'MinecraftFileSystem', {
-      vpc: vpc,
+      vpc: this.vpc,
       lifecyclePolicy: LifecyclePolicy.AFTER_7_DAYS,
     })
     fileSystem.connections.allowDefaultPortFrom(this.cluster)

@@ -3,6 +3,7 @@
 *.d.ts
 node_modules
 .log
+out
 
 # CDK asset staging directory
 .cdk.staging
@@ -10,3 +11,4 @@ cdk.out
 
 # Parcel default cache directory
 .parcel-cache
+/.vscode/
